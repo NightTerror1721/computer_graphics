@@ -4,6 +4,7 @@
 Image::Image() {
 	width = 0; height = 0;
 	pixels = NULL;
+	raster = nullptr;
 }
 
 Image::Image(unsigned int width, unsigned int height)
@@ -12,6 +13,7 @@ Image::Image(unsigned int width, unsigned int height)
 	this->height = height;
 	pixels = new Color[width*height];
 	memset(pixels, 0, width * height * sizeof(Color));
+	raster = nullptr;
 }
 
 //copy constructor
@@ -25,6 +27,12 @@ Image::Image(const Image& c) {
 		pixels = new Color[width*height];
 		memcpy(pixels, c.pixels, width*height*sizeof(Color));
 	}
+	if (c.raster)
+	{
+		raster = new RasterInfo[width * height];
+		std::memcpy(raster, c.raster, sizeof(RasterInfo) * height);
+	}
+	else raster = nullptr;
 }
 
 //assign operator
@@ -40,6 +48,12 @@ Image& Image::operator = (const Image& c)
 		pixels = new Color[width*height*sizeof(Color)];
 		memcpy(pixels, c.pixels, width*height*sizeof(Color));
 	}
+	if (c.raster)
+	{
+		raster = new RasterInfo[width * height];
+		std::memcpy(raster, c.raster, sizeof(RasterInfo) * height);
+	}
+	else raster = nullptr;
 	return *this;
 }
 
@@ -47,6 +61,8 @@ Image::~Image()
 {
 	if(pixels) 
 		delete pixels;
+	if (raster)
+		delete raster;
 }
 
 
@@ -66,6 +82,12 @@ void Image::resize(unsigned int width, unsigned int height)
 	this->width = width;
 	this->height = height;
 	pixels = new_pixels;
+
+	if (raster)
+	{
+		delete raster;
+		raster = nullptr;
+	}
 }
 
 //change image size and scale the content
@@ -236,6 +258,263 @@ bool Image::saveTGA(const char* filename)
 	fclose(file);
 	return true;
 }
+
+/* My stuff */
+void Image::_clearRaster()
+{
+	if (!raster)
+		raster = new RasterInfo[height];
+	for (int i = 0; i < height; ++i)
+	{
+		raster[i].min = static_cast<unsigned int>(-1);
+		raster[i].max = static_cast<unsigned int>(0);
+	}
+	//std::memset(raster, 0, sizeof(RasterInfo) * height);
+}
+
+void Image::_rasterTriangleLine(int x0, int y0, int x1, int y1)
+{
+	int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+	int dy = abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+	int err = (dx > dy ? dx : -dy) / 2, e2;
+
+	for (;;) {
+		
+		if (y0 >= 0 && y0 < height && x0 > 0 && x0 < width)
+		{
+			if (x0 < raster[y0].min)
+				raster[y0].min = x0;
+			if (x0 > raster[y0].max)
+				raster[y0].max = x0;
+		}
+
+		if (x0 == x1 && y0 == y1) break;
+		e2 = err;
+		if (e2 > -dx) { err -= dy; x0 += sx; }
+		if (e2 < dy) { err += dx; y0 += sy; }
+	}
+}
+
+void Image::drawLine(int x0, int y0, int x1, int y1, const Color& color)
+{
+	int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+	int dy = abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+	int err = (dx > dy ? dx : -dy) / 2, e2;
+
+	for (;;) {
+
+		if(y0 >= 0 && y0 < height && x0 > 0 && x0 < width)
+			pixels[y0 * width + x0] = color;
+
+		if (x0 == x1 && y0 == y1) break;
+		e2 = err;
+		if (e2 > -dx) { err -= dy; x0 += sx; }
+		if (e2 < dy) { err += dx; y0 += sy; }
+	}
+}
+
+void Image::fillTriangle(int x0, int y0, int x1, int y1, int x2, int y2, const Color& color)
+{
+	// raster part //
+	_clearRaster();
+
+	_rasterTriangleLine(x0, y0, x1, y1);
+	_rasterTriangleLine(x0, y0, x2, y2);
+	_rasterTriangleLine(x1, y1, x2, y2);
+
+	// fill part //
+	for (unsigned int y = 0; y < height; ++y)
+	{
+		if (raster[y].min < raster[y].max)
+		{
+			unsigned int max = raster[y].max;
+			for (unsigned int x = raster[y].min; x < max; ++x)
+				pixels[y * width + x] = color;
+		}
+	}
+}
+
+Vector3 Image::_weights(int x, int y, const Vector2& p0, const Vector2& p1, const Vector2& p2)
+{
+	Vector2 v0 = p1 - p0;
+	Vector2 v1 = p2 - p0;
+	Vector2 v2 = Vector2{ static_cast<float>(x), static_cast<float>(y) } -p0;
+
+	float d00 = v0.dot(v0);
+	float d01 = v0.dot(v1);
+	float d11 = v1.dot(v1);
+	float d20 = v2.dot(v0);
+	float d21 = v2.dot(v1);
+	float denom = d00 * d11 - d01 * d01;
+	float v = (d11 * d20 - d01 * d21) / denom;
+	float w = (d00 * d21 - d01 * d20) / denom;
+	float u = 1.0 - v - w;
+
+	return { u, v, w };
+}
+
+Color Image::_interpolatedColor(
+	int x, int y,
+	const Vector2& p0, const Vector2& p1, const Vector2& p2,
+	const Color& c0, const Color& c1, const Color& c2
+)
+{
+	Vector3 w = _weights(x, y, p0, p1, p2);
+
+	//use weights to compute final color
+	return c0 * w.x + c1 * w.y + c2 * w.z;
+}
+
+void Image::fillInterpolatedTriangle(int x0, int y0, int x1, int y1, int x2, int y2, const Color& c0, const Color& c1, const Color& c2)
+{
+	// raster part //
+	_clearRaster();
+
+	_rasterTriangleLine(x0, y0, x1, y1);
+	_rasterTriangleLine(x0, y0, x2, y2);
+	_rasterTriangleLine(x1, y1, x2, y2);
+
+	// interpoalted fill part //
+	const Vector2 p0{ static_cast<float>(x0), static_cast<float>(y0) };
+	const Vector2 p1{ static_cast<float>(x1), static_cast<float>(y1) };
+	const Vector2 p2{ static_cast<float>(x2), static_cast<float>(y2) };
+
+	for (unsigned int y = 0; y < height; ++y)
+	{
+		if (raster[y].min < raster[y].max)
+		{
+			unsigned int max = raster[y].max;
+			for (unsigned int x = raster[y].min; x < max; ++x)
+				pixels[y * width + x] = _interpolatedColor(x, y, p0, p1, p2, c0, c1, c2);
+		}
+	}
+}
+
+
+
+void Image::fillTriangle(FloatImage* z_buffer, const Vector3& v0, const Vector3& v1, const Vector3& v2, const Color& color)
+{
+	// raster part //
+	_clearRaster();
+
+	_rasterTriangleLine(static_cast<int>(v0.x), static_cast<int>(v0.y), static_cast<int>(v1.x), static_cast<int>(v1.y));
+	_rasterTriangleLine(static_cast<int>(v0.x), static_cast<int>(v0.y), static_cast<int>(v2.x), static_cast<int>(v2.y));
+	_rasterTriangleLine(static_cast<int>(v1.x), static_cast<int>(v1.y), static_cast<int>(v2.x), static_cast<int>(v2.y));
+
+	// fill part //
+	const Vector2 p0{ v0.x, v0.y };
+	const Vector2 p1{ v1.x, v1.y };
+	const Vector2 p2{ v2.x, v2.y };
+
+	for (unsigned int y = 0; y < height; ++y)
+	{
+		if (raster[y].min < raster[y].max)
+		{
+			unsigned int max = raster[y].max;
+			for (unsigned int x = raster[y].min; x < max; ++x)
+			{
+				Vector3 w = _weights(x, y, p0, p1, p2);
+				float depth = v0.z * w.x + v1.z * w.y + v2.z * w.z;
+				float& z_buffer_depth = z_buffer->getPixelRef(x, y);
+				if (depth < z_buffer_depth)
+				{
+					z_buffer_depth = depth;
+					pixels[y * width + x] = color;
+				}
+			}
+		}
+	}
+}
+
+void Image::fillInterpolatedTriangle(FloatImage* z_buffer, const Vector3& v0, const Vector3& v1, const Vector3& v2, const Color& c0, const Color& c1, const Color& c2)
+{
+	// raster part //
+	_clearRaster();
+
+	_rasterTriangleLine(static_cast<int>(v0.x), static_cast<int>(v0.y), static_cast<int>(v1.x), static_cast<int>(v1.y));
+	_rasterTriangleLine(static_cast<int>(v0.x), static_cast<int>(v0.y), static_cast<int>(v2.x), static_cast<int>(v2.y));
+	_rasterTriangleLine(static_cast<int>(v1.x), static_cast<int>(v1.y), static_cast<int>(v2.x), static_cast<int>(v2.y));
+
+	// fill part //
+	const Vector2 p0{ v0.x, v0.y };
+	const Vector2 p1{ v1.x, v1.y };
+	const Vector2 p2{ v2.x, v2.y };
+
+	for (unsigned int y = 0; y < height; ++y)
+	{
+		if (raster[y].min < raster[y].max)
+		{
+			unsigned int max = raster[y].max;
+			for (unsigned int x = raster[y].min; x < max; ++x)
+			{
+				Vector3 w = _weights(x, y, p0, p1, p2);
+				float depth = v0.z * w.x + v1.z * w.y + v2.z * w.z;
+				float& z_buffer_depth = z_buffer->getPixelRef(x, y);
+				if (depth < z_buffer_depth)
+				{
+					z_buffer_depth = depth;
+					pixels[y * width + x] = c0 * w.x + c1 * w.y + c2 * w.z;
+				}
+			}
+		}
+	}
+}
+
+
+//Transform coord in clip space to screen space//
+#define clipToScreen(_Coord, _Size) (((_Coord) + 1.f) * ((_Size) / 2.f))
+#define vector2ClipToScreen(_V, _Width, _Height) (_V).x = clipToScreen((_V).x, (_Width)); (_V).y = clipToScreen((_V).y, (_Height))
+void Image::fillTexturedTriangle(
+	FloatImage* z_buffer,
+	const Image* texture,
+	const Vector3& v0, const Vector3& v1, const Vector3& v2,
+	Vector2 t0, Vector2 t1, Vector2 t2
+)
+{
+	// raster part //
+	_clearRaster();
+
+	_rasterTriangleLine(static_cast<int>(v0.x), static_cast<int>(v0.y), static_cast<int>(v1.x), static_cast<int>(v1.y));
+	_rasterTriangleLine(static_cast<int>(v0.x), static_cast<int>(v0.y), static_cast<int>(v2.x), static_cast<int>(v2.y));
+	_rasterTriangleLine(static_cast<int>(v1.x), static_cast<int>(v1.y), static_cast<int>(v2.x), static_cast<int>(v2.y));
+
+	// fill part //
+	const Vector2 p0{ v0.x, v0.y };
+	const Vector2 p1{ v1.x, v1.y };
+	const Vector2 p2{ v2.x, v2.y };
+
+	vector2ClipToScreen(t0, texture->width, texture->height);
+	vector2ClipToScreen(t1, texture->width, texture->height);
+	vector2ClipToScreen(t2, texture->width, texture->height);
+
+	for (unsigned int y = 0; y < height; ++y)
+	{
+		if (raster[y].min < raster[y].max)
+		{
+			unsigned int max = raster[y].max;
+			for (unsigned int x = raster[y].min; x < max; ++x)
+			{
+				Vector3 w = _weights(x, y, p0, p1, p2);
+				if(w.x > 100)
+					w = _weights(x, y, p0, p1, p2);
+				float depth = v0.z * w.x + v1.z * w.y + v2.z * w.z;
+				float& z_buffer_depth = z_buffer->getPixelRef(x, y);
+				if (depth < z_buffer_depth)
+				{
+					z_buffer_depth = depth;
+					pixels[y * width + x] = texture->getPixel(
+						static_cast<unsigned int>(t0.x * w.x + t1.x * w.y + t2.x * w.z),
+						static_cast<unsigned int>(t0.y * w.x + t1.y * w.y + t2.y * w.z)
+					);
+				}
+			}
+		}
+	}
+}
+
+
+
+
 
 
 FloatImage::FloatImage(unsigned int width, unsigned int height)

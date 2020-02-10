@@ -40,6 +40,18 @@ void Camera::updateViewMatrix()
 	//Careful with the order of matrix multiplications, and be sure to use normalized vectors
 
 	//YOUR CODE HERE
+	Vector3 front = (center - eye).normalize();
+	Vector3 side = front.cross(up).normalize();
+	Vector3 top = side.cross(front);
+
+	view_matrix.setIdentity();
+
+	view_matrix.M[0][0] = side.x;   view_matrix.M[1][0] = side.y;   view_matrix.M[2][0] = side.z;
+	view_matrix.M[0][1] = top.x;    view_matrix.M[1][1] = top.y;    view_matrix.M[2][1] = top.z;
+	view_matrix.M[0][2] = -front.x; view_matrix.M[1][2] = -front.y; view_matrix.M[2][2] = -front.z;
+
+	view_matrix.traslateLocal(-eye.x, -eye.y, -eye.z);
+
 
 	//update the viewprojection_matrix
 	viewprojection_matrix = view_matrix * projection_matrix;
@@ -51,6 +63,19 @@ void Camera::updateProjectionMatrix()
 	//Careful with using degrees in trigonometric functions, must be radians, and use float types in divisions
 
 	//YOUR CODE HERE
+	float f = 1.f / std::tan((fov * DEG2RAD) / 2.f);
+
+	projection_matrix.setIdentity();
+
+	projection_matrix.M[0][0] = f / aspect;
+
+	projection_matrix.M[1][1] = f;
+
+	projection_matrix.M[2][2] = (far_plane + near_plane) / (near_plane - far_plane);
+	projection_matrix.M[3][2] = -1;
+
+	projection_matrix.M[2][3] = 2.f * ((far_plane * near_plane) / (near_plane - far_plane));
+
 
 	//update the viewprojection_matrix
 	viewprojection_matrix = view_matrix * projection_matrix;

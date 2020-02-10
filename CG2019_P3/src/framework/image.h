@@ -30,10 +30,17 @@ class Image
 		unsigned char* data; //bytes with the pixel information
 	} TGAInfo;
 
+	struct RasterInfo
+	{
+		unsigned int max;
+		unsigned int min;
+	};
+
 public:
 	unsigned int width;
 	unsigned int height;
 	Color* pixels;
+	RasterInfo* raster;
 
 	// CONSTRUCTORS 
 	Image();
@@ -88,6 +95,34 @@ public:
 	}
 
 	#endif
+
+/* my stuff */
+public:
+	void drawLine(int x0, int y0, int x1, int y1, const Color& color);
+
+	void fillTriangle(int x0, int y0, int x1, int y1, int x2, int y2, const Color& color);
+	void fillInterpolatedTriangle(int x0, int y0, int x1, int y1, int x2, int y2, const Color& c0, const Color& c1, const Color& c2);
+
+	void fillTriangle(FloatImage* z_buffer, const Vector3& v0, const Vector3& v1, const Vector3& v2, const Color& color);
+	void fillInterpolatedTriangle(FloatImage* z_buffer, const Vector3& v0, const Vector3& v1, const Vector3& v2, const Color& c0, const Color& c1, const Color& c2);
+
+	void fillTexturedTriangle(
+		FloatImage* z_buffer,
+		const Image* texture,
+		const Vector3& v0, const Vector3& v1, const Vector3& v2,
+		Vector2 t0, Vector2 t1, Vector2 t2
+	);
+
+private:
+	void _clearRaster();
+	void _rasterTriangleLine(int x0, int y0, int x1, int y1);
+
+	static Vector3 _weights(int x, int y, const Vector2& p0, const Vector2& p1, const Vector2& p2);
+	static Color _interpolatedColor(
+		int x, int y,
+		const Vector2& p0, const Vector2& p1, const Vector2& p2,
+		const Color& c0, const Color& c1, const Color& c2
+	);
 
 
 };
