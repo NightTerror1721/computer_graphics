@@ -59,6 +59,16 @@ public:
 	}
 
 	void start();
+
+
+	/* My Code */
+
+	bool _rotationDragEnabled;
+	bool _traslationDragEnabled;
+	Vector2 _dragMouseOrigin;
+	Vector3 _dragEyeOrigin;
+	Vector3 _dragCenterOrigin;
+	
 };
 
 

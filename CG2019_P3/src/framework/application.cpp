@@ -50,6 +50,15 @@ void Application::init(void)
 
 	//Init zbuffer
 	z_buffer = new FloatImage{ framebuffer.width, framebuffer.height };
+
+
+	/* Drag input init */
+
+	_rotationDragEnabled = false;
+	_traslationDragEnabled = false;
+	_dragMouseOrigin = {};
+	_dragEyeOrigin = {};
+	_dragCenterOrigin = {};
 }
 
 //this function fills the triangle by computing the bounding box of the triangle in screen space and using the barycentric interpolation
@@ -126,11 +135,6 @@ void Application::render(Image& framebuffer)
 	//for every point of the mesh (to draw triangles take three points each time and connect the points between them (1,2,3,   4,5,6,   ... )
 	for (int i = 0; i < mesh->vertices.size(); i += 3)
 	{
-		//Vector3 vertex = mesh->vertices[i]; //extract vertex from mesh
-		//Vector2 texcoord = mesh->uvs[i]; //texture coordinate of the vertex (they are normalized, from 0,0 to 1,1)
-
-		//project every point in the mesh to normalized coordinates using the viewprojection_matrix inside camera
-		//Vector3 normalized_point = camera->projectVector(vertex);
 		Vector3 p0 = camera->projectVector(mesh->vertices[i]);
 		Vector3 p1 = camera->projectVector(mesh->vertices[i + 1]);
 		Vector3 p2 = camera->projectVector(mesh->vertices[i + 2]);
@@ -153,10 +157,6 @@ void Application::render(Image& framebuffer)
 		Vector2 uv2 = mesh->uvs[i + 2];
 
 		fillTriangle(framebuffer, p0, p1, p2, uv0, uv1, uv2, texture, z_buffer);
-
-		//paint point in framebuffer (using setPixel or drawTriangle)
-		//framebuffer.fillInterpolatedTriangle(z_buffer, p0, p1, p2, Color::RED, Color::GREEN, Color::BLUE);
-		//framebuffer.fillTexturedTriangle(z_buffer, texture, p0, p1, p2, mesh->uvs[i], mesh->uvs[i + 1], mesh->uvs[i + 2]);
 	}
 }
 
@@ -173,6 +173,43 @@ void Application::update(double seconds_elapsed)
 		camera->eye.x -= 5 * seconds_elapsed;
 	if (keystate[SDL_SCANCODE_RIGHT])
 		camera->eye.x += 5 * seconds_elapsed;
+
+
+	/* Mouse Drag update */
+	if (_rotationDragEnabled)
+	{
+		float dx = (_dragMouseOrigin.x - mouse_position.x) / window_width / 2 * 3.f;
+		float dy = (_dragMouseOrigin.y - mouse_position.y) / window_height / 2 * 3.f;
+
+		Vector3 front = (camera->center - camera->eye).normalize();
+		Vector3 side = front.cross(camera->up).normalize();
+		Vector3 top = side.cross(front);
+
+		Matrix44 rot_x, rot_y;
+		rot_x.rotateLocal(dx, top);
+		rot_y.rotateLocal(dy, side);
+
+		Matrix44 rot = rot_x * rot_y;
+
+		Vector3 c_pos = _dragCenterOrigin - _dragEyeOrigin;
+		camera->center = rot.rotateVector(c_pos) + _dragEyeOrigin;
+	}
+	else if (_traslationDragEnabled)
+	{
+		float dx = (_dragMouseOrigin.x - mouse_position.x) / window_width / 2 * 20.f;
+		float dy = (_dragMouseOrigin.y - mouse_position.y) / window_height / 2 * 20.f;
+
+		Vector3 front = (camera->center - camera->eye).normalize();
+		Vector3 side = front.cross(camera->up).normalize();
+		Vector3 top = side.cross(front);
+
+		Matrix44 rot = camera->view_matrix.getRotationOnly();
+		Vector3 vtr = Vector3{ -dy, dx, 0 }.cross(front);
+
+		camera->eye = _dragEyeOrigin + vtr;
+		camera->center = _dragCenterOrigin + vtr;
+	}
+
 
 	//if we modify the camera fields, then update matrices
 	camera->updateViewMatrix();
@@ -201,7 +238,17 @@ void Application::onMouseButtonDown( SDL_MouseButtonEvent event )
 {
 	if (event.button == SDL_BUTTON_LEFT) //left mouse pressed
 	{
-
+		_traslationDragEnabled = true;
+		_dragMouseOrigin.set(static_cast<float>(event.x), window_height - static_cast<float>(event.y));
+		_dragEyeOrigin = camera->eye;
+		_dragCenterOrigin = camera->center;
+	}
+	if (event.button == SDL_BUTTON_RIGHT) //right mouse pressed
+	{
+		_rotationDragEnabled = true;
+		_dragMouseOrigin.set(static_cast<float>(event.x), window_height - static_cast<float>(event.y));
+		_dragEyeOrigin = camera->eye;
+		_dragCenterOrigin = camera->center;
 	}
 }
 
@@ -209,7 +256,11 @@ void Application::onMouseButtonUp( SDL_MouseButtonEvent event )
 {
 	if (event.button == SDL_BUTTON_LEFT) //left mouse unpressed
 	{
-
+		_traslationDragEnabled = false;
+	}
+	if (event.button == SDL_BUTTON_RIGHT) //right mouse unpressed
+	{
+		_rotationDragEnabled = false;
 	}
 }
 
