@@ -334,11 +334,11 @@ void Image::fillTriangle(int x0, int y0, int x1, int y1, int x2, int y2, const C
 	}
 }
 
-Vector3 Image::_weights(int x, int y, const Vector2& p0, const Vector2& p1, const Vector2& p2)
+/*Vector3 Image::_weights(int x, int y, const Vector2& p0, const Vector2& p1, const Vector2& p2)
 {
 	Vector2 v0 = p1 - p0;
 	Vector2 v1 = p2 - p0;
-	Vector2 v2 = Vector2{ static_cast<float>(x), static_cast<float>(y) } -p0;
+	Vector2 v2 = Vector2{ static_cast<float>(x), static_cast<float>(y) } - p0;
 
 	float d00 = v0.dot(v0);
 	float d01 = v0.dot(v1);
@@ -349,6 +349,18 @@ Vector3 Image::_weights(int x, int y, const Vector2& p0, const Vector2& p1, cons
 	float v = (d11 * d20 - d01 * d21) / denom;
 	float w = (d00 * d21 - d01 * d20) / denom;
 	float u = 1.0 - v - w;
+
+	return { u, v, w };
+}*/
+
+Vector3 Image::_weights(int x, int y, const Vector2& p0, const Vector2& p1, const Vector2& p2)
+{
+	Vector2 p{ static_cast<float>(x), static_cast<float>(y) };
+
+	float den = (p1.y - p2.y) * (p0.x - p2.x) + (p2.x - p1.x) * (p0.y - p2.y);
+	float u = ((p1.y - p2.y) * (p.x - p2.x) + (p2.x - p1.x) * (p.y - p2.y)) / den;
+	float v = ((p2.y - p0.y) * (p.x - p2.x) + (p0.x - p2.x) * (p.y - p2.y)) / den;
+	float w = 1.f - u - v;
 
 	return { u, v, w };
 }
@@ -495,17 +507,20 @@ void Image::fillTexturedTriangle(
 			for (unsigned int x = raster[y].min; x < max; ++x)
 			{
 				Vector3 w = _weights(x, y, p0, p1, p2);
-				if(w.x > 100)
+				if(std::abs(w.x) > 1 || std::abs(w.y) > 1 || std::abs(w.z) > 1)
 					w = _weights(x, y, p0, p1, p2);
-				float depth = v0.z * w.x + v1.z * w.y + v2.z * w.z;
-				float& z_buffer_depth = z_buffer->getPixelRef(x, y);
-				if (depth < z_buffer_depth)
+				if (w.x >= 0 && w.y >= 0 && w.z >= 0)
 				{
-					z_buffer_depth = depth;
-					pixels[y * width + x] = texture->getPixel(
-						static_cast<unsigned int>(t0.x * w.x + t1.x * w.y + t2.x * w.z),
-						static_cast<unsigned int>(t0.y * w.x + t1.y * w.y + t2.y * w.z)
-					);
+					float depth = v0.z * w.x + v1.z * w.y + v2.z * w.z;
+					float& z_buffer_depth = z_buffer->getPixelRef(x, y);
+					if (depth < z_buffer_depth)
+					{
+						z_buffer_depth = depth;
+						pixels[y * width + x] = texture->getPixel(
+							static_cast<unsigned int>(t0.x * w.x + t1.x * w.y + t2.x * w.z),
+							static_cast<unsigned int>(t0.y * w.x + t1.y * w.y + t2.y * w.z)
+						);
+					}
 				}
 			}
 		}

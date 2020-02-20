@@ -240,5 +240,8 @@ inline Vector3u operator * (float v, const Vector3u& c) { return Vector3u((unsig
 float ComputeSignedAngle( Vector2 a, Vector2 b);
 Vector3 RayPlaneCollision( const Vector3& plane_pos, const Vector3& plane_normal, const Vector3& ray_origin, const Vector3& ray_dir );
 
+void computeMinMax(Vector3 p0, Vector3 p1, Vector3 p3, Vector3& min_, Vector3& max_);
+Vector3 clamp(Vector3 a, Vector3 min_, Vector3 max_);
+
 
 #endif

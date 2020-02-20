@@ -34,27 +34,83 @@ void Application::init(void)
 {
 	std::cout << "initiating app..." << std::endl;
 
-	//Init zbuffer
-	z_buffer = new FloatImage{ static_cast<unsigned int>(window_width), static_cast<unsigned int>(window_height) };
-	
 	//here we create a global camera and set a position and projection properties
 	camera = new Camera();
-	camera->lookAt(Vector3(0,10,20),Vector3(0,10,0),Vector3(0,1,0)); //define eye,center,up
+	camera->lookAt(Vector3(0, 10, 20), Vector3(0, 10, 0), Vector3(0, 1, 0)); //define eye,center,up
 	camera->perspective(60, window_width / (float)window_height, 0.1, 10000); //define fov,aspect,near,far
 
 	//load a mesh
 	mesh = new Mesh();
-	if( !mesh->loadOBJ("lee.obj") )
+	if (!mesh->loadOBJ("lee.obj"))
 		std::cout << "FILE Lee.obj NOT FOUND" << std::endl;
-
-	//load a cube
-	cube = new Mesh();
-	if (!cube->loadOBJ("cube.obj"))
-		std::cout << "FILE cube.obj NOT FOUND" << std::endl;
 
 	//load the texture
 	texture = new Image();
 	texture->loadTGA("color.tga");
+
+	//Init zbuffer
+	z_buffer = new FloatImage{ framebuffer.width, framebuffer.height };
+}
+
+//this function fills the triangle by computing the bounding box of the triangle in screen space and using the barycentric interpolation
+//to check which pixels are inside the triangle. It is slow for big triangles, but faster for small triangles
+void fillTriangle(Image& colorbuffer, const Vector3& p0, const Vector3& p1, const Vector3& p2, const Vector2& uv0, const Vector2& uv1, const Vector2& uv2, Image* texture = NULL, FloatImage* zbuffer = NULL)
+{
+	//compute triangle bounding box in screen space
+	Vector3 min_, max_;
+	computeMinMax(p0, p1, p2, min_, max_);
+	//clamp to screen area
+	min_ = clamp(min_, Vector3(0, 0, -1), Vector3(colorbuffer.width - 1, colorbuffer.height - 1, 1));
+	max_ = clamp(max_, Vector3(0, 0, -1), Vector3(colorbuffer.width - 1, colorbuffer.height - 1, 1));
+
+	//this avoids strange artifacts if the triangle is too big, just ignore this line
+	if ((min_.x == 0.0 && max_.x == colorbuffer.width - 1) || (min_.y == 0.0 && max_.y == colorbuffer.height - 1))
+		return;
+
+	//we must compute the barycentrinc interpolation coefficients
+	//we precompute some of them outside of loop to speed up (because they are constant)
+	Vector3 v0 = p1 - p0;
+	Vector3 v1 = p2 - p0;
+	float d00 = v0.dot(v0);
+	float d01 = v0.dot(v1);
+	float d11 = v1.dot(v1);
+	float denom = d00 * d11 - d01 * d01;
+
+	//loop all pixels inside bounding box
+	for (int x = min_.x; x < max_.x; ++x)
+	{
+#pragma omp parallel for //HACK: this is to execute loop iterations in parallel in multiple cores, should go faster (search openmp in google for more info)
+		for (int y = min_.y; y < max_.y; ++y)
+		{
+			Vector3 P(x, y, 0);
+			Vector3 v2 = P - p0; //P is the x,y of the pixel
+
+			//computing all weights of pixel P(x,y)
+			float d20 = v2.dot(v0);
+			float d21 = v2.dot(v1);
+			float v = (d11 * d20 - d01 * d21) / denom;
+			float w = (d00 * d21 - d01 * d20) / denom;
+			float u = 1.0 - v - w;
+			//check if pixel is inside or outside the triangle
+			if (u < 0 || u > 1 || v < 0 || v > 1 || w < 0 || w > 1 || denom == 0)
+				continue; //if it is outside, skip to next
+
+			//here add your code to test occlusions based on the Z of the vertices and the pixel
+			float depth = p0.z * u + p1.z * v + p2.z * w;
+			float& zbuf_depth = zbuffer->getPixelRef(x, y);
+			if (depth >= zbuf_depth)
+				continue;
+			zbuf_depth = depth;
+
+			//here add your code to compute the color of the pixel
+			unsigned int tx = static_cast<unsigned int>((uv0.x * u + uv1.x * v + uv2.x * w) * texture->width);
+			unsigned int ty = static_cast<unsigned int>((uv0.y * u + uv1.y * v + uv2.y * w) * texture->height);
+			const Color& tcolor = texture->getPixelRef(tx, ty);
+
+			//draw the pixels in the colorbuffer x,y position
+			colorbuffer.setPixel(x, y, tcolor);
+		}
+	}
 }
 
 #define isOutOfClip(_Point) ((_Point).x < -1 || (_Point).x > 1 || (_Point).y < -1 || (_Point).y > 1)
@@ -92,8 +148,14 @@ void Application::render(Image& framebuffer)
 		p2.x = (p2.x + 1.f) * window_width / 2.f;
 		p2.y = (p2.y + 1.f) * window_height / 2.f;
 
+		Vector2 uv0 = mesh->uvs[i];
+		Vector2 uv1 = mesh->uvs[i + 1];
+		Vector2 uv2 = mesh->uvs[i + 2];
+
+		fillTriangle(framebuffer, p0, p1, p2, uv0, uv1, uv2, texture, z_buffer);
+
 		//paint point in framebuffer (using setPixel or drawTriangle)
-		framebuffer.fillInterpolatedTriangle(z_buffer, p0, p1, p2, Color::RED, Color::GREEN, Color::BLUE);
+		//framebuffer.fillInterpolatedTriangle(z_buffer, p0, p1, p2, Color::RED, Color::GREEN, Color::BLUE);
 		//framebuffer.fillTexturedTriangle(z_buffer, texture, p0, p1, p2, mesh->uvs[i], mesh->uvs[i + 1], mesh->uvs[i + 2]);
 	}
 }

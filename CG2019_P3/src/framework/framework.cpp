@@ -496,3 +496,24 @@ Vector3 RayPlaneCollision( const Vector3& plane_pos, const Vector3& plane_normal
     double t = -(numer / denom);
 	return ray_origin + ray_dir * t;
 }
+
+void computeMinMax(Vector3 p0, Vector3 p1, Vector3 p2, Vector3& min_, Vector3& max_)
+{
+	for (int i = 0; i < 3; ++i)
+	{
+		min_.v[i] = p0.v[i] < p1.v[i] ? p0.v[i] : p1.v[i];
+		if (p2.v[i] < min_.v[i])
+			min_.v[i] = p2.v[i];
+		max_.v[i] = p0.v[i] > p1.v[i] ? p0.v[i] : p1.v[i];
+		if (p2.v[i] > max_.v[i])
+			max_.v[i] = p2.v[i];
+	}
+}
+
+Vector3 clamp(Vector3 v, Vector3 min_, Vector3 max_)
+{
+	Vector3 r;
+	for (int i = 0; i < 3; ++i)
+		r.v[i] = clamp(v.v[i], min_.v[i], max_.v[i]);
+	return r;
+}
